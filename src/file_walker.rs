@@ -257,6 +257,13 @@ pub fn file_types() -> Vec<(&'static str, FileType)> {
             },
         ),
         (
+            ".ttl",
+            FileType {
+                language: "turtle",
+                category: FileCategory::Document,
+            },
+        ),
+        (
             ".html",
             FileType {
                 language: "html",

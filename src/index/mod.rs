@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{bail, Context, Result};
+use regex::Regex;
 
 use crate::bm25::Bm25Index;
 use crate::encoder::{SemanticIndex, StaticEncoder};
@@ -36,15 +37,18 @@ impl SembleIndex {
         extensions: Option<&HashSet<String>>,
         ignore: Option<&HashSet<String>>,
         include_text_files: bool,
+        chunk_regex: Option<&Regex>,
     ) -> Result<Self> {
         let path = path.as_ref();
         if !path.exists() {
             bail!("Path does not exist: {}", path.display());
         }
-        if !path.is_dir() {
-            bail!("Path is not a directory: {}", path.display());
-        }
         let path = path.canonicalize().context("Failed to resolve path")?;
+        let display_root = if path.is_dir() {
+            path.clone()
+        } else {
+            path.parent().unwrap_or(&path).to_path_buf()
+        };
         let encoder = match encoder {
             Some(e) => e,
             None => StaticEncoder::load(None).context("Failed to load embedding model")?,
@@ -56,10 +60,11 @@ impl SembleIndex {
             extensions,
             ignore,
             include_text_files,
-            &path,
+            &display_root,
+            chunk_regex,
         )?;
 
-        let file_sizes = compute_file_sizes(&path, &chunks);
+        let file_sizes = compute_file_sizes(&display_root, &chunks);
         let (file_mapping, language_mapping) = build_mappings(&chunks);
 
         Ok(Self {
@@ -82,6 +87,7 @@ impl SembleIndex {
         extensions: Option<&HashSet<String>>,
         ignore: Option<&HashSet<String>>,
         include_text_files: bool,
+        chunk_regex: Option<&Regex>,
     ) -> Result<Self> {
         let tmp_dir = std::env::temp_dir().join(format!("semble-clone-{}", std::process::id()));
         std::fs::create_dir_all(&tmp_dir)?;
@@ -120,6 +126,7 @@ impl SembleIndex {
             ignore,
             include_text_files,
             &resolved,
+            chunk_regex,
         );
 
         let (bm25_index, semantic_index, chunks, graph) = match result {

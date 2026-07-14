@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
+use regex::Regex;
 
 use crate::bm25::Bm25Index;
 use crate::chunking::chunk_source;
@@ -11,7 +12,7 @@ use crate::graph::DependencyGraph;
 use crate::tokens::tokenize;
 use crate::types::Chunk;
 
-const MAX_FILE_BYTES: u64 = 1_000_000;
+const MAX_FILE_BYTES: u64 = 2_000_000;
 
 fn enrich_for_bm25(chunk: &Chunk) -> String {
     let path = Path::new(&chunk.file_path);
@@ -49,9 +50,15 @@ pub fn create_index_from_path(
     ignore: Option<&HashSet<String>>,
     include_text_files: bool,
     display_root: &Path,
+    chunk_regex: Option<&Regex>,
 ) -> Result<(Bm25Index, SemanticIndex, Vec<Chunk>, DependencyGraph)> {
     let exts = filter_extensions(extensions, include_text_files);
-    let files = walk_files(path, &exts, ignore);
+
+    let files: Vec<std::path::PathBuf> = if path.is_dir() {
+        walk_files(path, &exts, ignore)
+    } else {
+        vec![path.to_path_buf()]
+    };
 
     let mut chunks: Vec<Chunk> = Vec::new();
     let mut graph = DependencyGraph::new();
@@ -74,7 +81,7 @@ pub fn create_index_from_path(
             .unwrap_or(file_path)
             .to_string_lossy()
             .to_string();
-        chunks.extend(chunk_source(&source, &chunk_path, language));
+        chunks.extend(chunk_source(&source, &chunk_path, language, chunk_regex));
 
         if let Some(lang) = language {
             graph.add_file(&chunk_path, &source, lang);

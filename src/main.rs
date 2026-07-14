@@ -2,6 +2,7 @@ use std::io::Read;
 use std::process;
 
 use clap::{Parser, Subcommand};
+use regex::Regex;
 
 use semble::digest::{self, Format};
 use semble::encoder::StaticEncoder;
@@ -59,6 +60,10 @@ enum Commands {
         /// Overrides SEMBLE_MODEL_PATH; default: minishlab/potion-code-16M.
         #[arg(long)]
         model: Option<String>,
+        /// Regex pattern to define chunk boundaries. Each match starts a new chunk.
+        /// Overrides tree-sitter and line-based chunking when provided.
+        #[arg(long)]
+        chunk_regex: Option<String>,
     },
     /// Find code similar to a specific location
     FindRelated {
@@ -81,6 +86,9 @@ enum Commands {
         /// Embedding model (HF repo id or local path).
         #[arg(long)]
         model: Option<String>,
+        /// Regex pattern to define chunk boundaries.
+        #[arg(long)]
+        chunk_regex: Option<String>,
     },
     /// Show what a file depends on and what symbols it defines
     Deps {
@@ -156,6 +164,9 @@ enum Commands {
         /// Embedding model (HF repo id or local path).
         #[arg(long)]
         model: Option<String>,
+        /// Regex pattern to define chunk boundaries.
+        #[arg(long)]
+        chunk_regex: Option<String>,
     },
     /// Show token savings and usage stats
     Savings {
@@ -222,7 +233,7 @@ fn main() {
             lang,
             include_text_files,
         } => {
-            let index = build_index(&path, include_text_files, None);
+            let index = build_index(&path, include_text_files, None, None);
             let opts = TreeOptions {
                 dirs_only,
                 max_depth,
@@ -353,7 +364,7 @@ fn main() {
             tree,
             max_depth,
         } => {
-            let index = build_index(&path, false, None);
+            let index = build_index(&path, false, None, None);
             let graph = index.graph();
 
             if dot {
@@ -428,7 +439,7 @@ fn main() {
             tree,
             max_depth,
         } => {
-            let index = build_index(&path, false, None);
+            let index = build_index(&path, false, None, None);
             let graph = index.graph();
 
             if dot {
@@ -467,8 +478,9 @@ fn main() {
             include_text_files,
             json,
             model,
+            chunk_regex,
         } => {
-            let index = build_index(&path, include_text_files, model.as_deref());
+            let index = build_index(&path, include_text_files, model.as_deref(), chunk_regex.as_deref());
             let results = index.search(task.as_str(), top_k, None, None, None);
             let report = build_plan(&task, &path, top_k, &results);
 
@@ -492,8 +504,9 @@ fn main() {
             outline,
             group,
             model,
+            chunk_regex,
         } => {
-            let index = build_index(&path, include_text_files, model.as_deref());
+            let index = build_index(&path, include_text_files, model.as_deref(), chunk_regex.as_deref());
 
             let results = index.search(query.as_str(), top_k, None, None, None);
             if outline {
@@ -523,8 +536,9 @@ fn main() {
             include_text_files,
             json,
             model,
+            chunk_regex,
         } => {
-            let index = build_index(&path, include_text_files, model.as_deref());
+            let index = build_index(&path, include_text_files, model.as_deref(), chunk_regex.as_deref());
 
             let chunk = match resolve_chunk(index.chunks(), &file_path, line) {
                 Some(c) => c.clone(),
@@ -745,17 +759,23 @@ fn print_json(results: &[SearchResult]) {
     );
 }
 
-fn build_index(path: &str, include_text_files: bool, model: Option<&str>) -> SembleIndex {
+fn build_index(path: &str, include_text_files: bool, model: Option<&str>, chunk_regex: Option<&str>) -> SembleIndex {
     let encoder = model.map(|m| {
         StaticEncoder::load(Some(m)).unwrap_or_else(|e| {
             eprintln!("Failed to load model {m:?}: {e}");
             process::exit(1);
         })
     });
+    let chunk_re = chunk_regex.map(|r| {
+        Regex::new(r).unwrap_or_else(|e| {
+            eprintln!("Invalid --chunk-regex pattern: {e}");
+            process::exit(1);
+        })
+    });
     let result = if is_git_url(path) {
-        SembleIndex::from_git(path, None, encoder, None, None, include_text_files)
+        SembleIndex::from_git(path, None, encoder, None, None, include_text_files, chunk_re.as_ref())
     } else {
-        SembleIndex::from_path(path, encoder, None, None, include_text_files)
+        SembleIndex::from_path(path, encoder, None, None, include_text_files, chunk_re.as_ref())
     };
 
     match result {

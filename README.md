@@ -42,6 +42,7 @@ For agent integration (Claude Code, Codex, Cursor), see [Agent integration](#age
 - **Token-efficient**: `tree` collapses `ls -R` by **4×–747×**; `--outline` is **-47%** vs full output; `digest` reaches **-98.9%** on real GitHub Actions logs.
 - **Hybrid retrieval**: BM25 + Model2Vec embeddings fused with RRF, then reranked with definition / identifier-stem / file-coherence boosts and noise penalties.
 - **Dependency graph**: `deps` / `impact` show what a file imports, defines, and what changes if you touch it. Optional Graphviz `--dot` output.
+- **Custom chunking**: `--chunk-regex` lets you define chunk boundaries with a regex pattern. Split files by section headers, RDF subjects, blank lines, or any user-defined marker. Works on any file type — TTL, Markdown, XML, logs, Prolog, etc.
 - **Build / CI compression**: `digest` auto-detects cargo, pnpm/npm/yarn/bun, tsc, pytest, go test, gradle, ruff, mypy, clang/gcc/cmake/make/swiftc, GitHub Actions.
 - **Single binary**: no Python, no daemon, no API keys. Runs on CPU.
 
@@ -51,6 +52,11 @@ For agent integration (Claude Code, Codex, Cursor), see [Agent integration](#age
 semble_rs search "auth flow" ./my-project --outline    # pass 1: structural overview
 semble_rs search "loginWithEmail" ./my-project --compact   # pass 2: matching lines
 semble_rs search "save model" https://github.com/MinishLab/model2vec   # git URL
+
+# Custom chunking — split by structure markers (section headers, RDF subjects, blank lines)
+semble_rs search "prescricao" file.ttl --chunk-regex 'wiki-res:\S+ rdf:type ' --include-text-files --compact
+semble_rs search "authentication" ./docs --chunk-regex '(?m)^# ' --outline
+semble_rs search "timeout" config/settings --chunk-regex '\n\s*\n' --include-text-files
 ```
 
 `path` defaults to the current directory; git URLs are accepted (cloned shallow).
@@ -88,6 +94,38 @@ semble_rs plan "fix auth flow bug" ./my-project -k 5
 ### `--model`
 
 All search-side commands accept `--model <hf-repo-or-local-path>` to override the default embedder. Also honours the `SEMBLE_MODEL_PATH` environment variable.
+
+### `--chunk-regex`
+
+Define chunk boundaries with a regex pattern. Each match of the pattern starts a new chunk; content between matches (or from the previous match to the end of the file) forms a chunk. When provided, `--chunk-regex` overrides both tree-sitter and line-based fallback chunking.
+
+Useful for structured files whose semantic chunks aren't function/class boundaries — Turtle (TTL), Markdown, YAML, logs, XML, Prolog, or any text with user-defined section markers.
+
+```bash
+# Split by comment headers (TTL glossary, Markdown docs, YAML sections)
+semble_rs search "fundamenta" wiki-grep-glossary.ttl --chunk-regex '(?m)^# ' --include-text-files --compact
+
+# Split by RDF subject (each resource becomes a chunk)
+semble_rs search "prescricao" wiki-grep-index.ttl --chunk-regex 'wiki-res:\S+ rdf:type ' --include-text-files --outline
+
+# Split by blank lines (Turtle multi-line blocks, paragraphs)
+semble_rs search "acesso" wiki-instances.ttl --chunk-regex '\n\s*\n' --include-text-files --compact
+
+# Split by arbitrary section markers
+semble_rs search "config" ./settings.txt --chunk-regex '={3,}.*={3,}' --include-text-files --outline
+```
+
+| Pattern | What it matches | Typical use case |
+|---|---|---|
+| `(?m)^# ` | Lines starting with `#` | Comment headers in TTL, MD, YAML |
+| `(?m)^#{1,3} ` | Markdown headings | Section boundaries in docs |
+| `\n\s*\n` | Blank lines | Paragraphs, multi-line blocks |
+| `={3,}.*={3,}` | Literal separators like `===section===` | User-defined sections in text files |
+| `wiki-res:\S+ rdf:type ` | RDF subject with type declaration | Turtle index files grouped by resource |
+| `\[\d{4}-\d{2}-\d{2}` | Timestamps like `[2026-07-` | Log entries |
+| `<item[ >]` | XML tags `<item>` | Items in structured XML |
+
+`--chunk-regex` is available on `search`, `plan`, and `find-related`. Combine with `--include-text-files` to index non-code formats (TTL, Markdown, YAML, JSON, etc.).
 
 ## Tree
 
@@ -186,6 +224,9 @@ semble_rs search "<feature or symbol>" . --outline # pass 1
 semble_rs search "<feature or symbol>" . --compact # pass 2
 semble_rs deps   <file> .                          # what file imports / defines
 semble_rs impact <file> .                          # files affected by changes
+
+# Custom chunking for structured files (TTL, Markdown, YAML, logs)
+semble_rs search "<query>" file.ttl --chunk-regex '<pattern>' --include-text-files --outline
 ​```
 
 Compress noisy command output before reading it:
@@ -201,7 +242,9 @@ gh run view <id> --log-failed | semble_rs digest
 
 ## How it works
 
-`semble_rs` chunks every file with `tree-sitter` at function / class / module boundaries (line-based fallback for unsupported languages), then scores every query with two complementary retrievers: static [Model2Vec](https://github.com/MinishLab/model2vec) embeddings (default `minishlab/potion-code-16M`) for semantic similarity, and BM25 for lexical matches on identifiers and API names. Score lists are fused with Reciprocal Rank Fusion.
+`semble_rs` chunks every file — with `tree-sitter` at function / class / module boundaries, with `--chunk-regex` for user-defined structure markers, or with a line-based fallback for unsupported languages — then scores every query with two complementary retrievers: static [Model2Vec](https://github.com/MinishLab/model2vec) embeddings (default `minishlab/potion-code-16M`) for semantic similarity, and BM25 for lexical matches on identifiers and API names. Score lists are fused with Reciprocal Rank Fusion.
+
+When `--chunk-regex` is provided, each regex match starts a new chunk and overrides both tree-sitter and line-based fallback, giving you full control over how your files are segmented for search.
 
 After fusion, results are reranked with code-aware signals:
 
@@ -286,6 +329,7 @@ Measured on real projects:
 | PHP | ✓ | ✓ | ✓ |
 | Swift | ✓ | ✓ | ✓ |
 | HTML / CSS / Vue / Svelte | ✓ | line-based | partial |
+| Turtle (`.ttl`) / RDF | ✓ | `--chunk-regex` via `--include-text-files` | — |
 | Other | ✓ | line-based | — |
 
 ## License

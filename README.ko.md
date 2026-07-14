@@ -56,6 +56,7 @@ gh run view <id> --log-failed | semble_rs digest
 - **토큰 효율**: `tree`는 `ls -R` 대비 **4×–747×** 압축, `--outline`은 `--compact` 대비 **-47%**, `digest`는 실제 GitHub Actions 로그에서 **-98.9%**.
 - **하이브리드 검색**: BM25 + Model2Vec 임베딩을 RRF로 융합 후 정의 / 식별자 stem / 파일 일관성 boost와 노이즈 페널티로 reranking.
 - **의존성 그래프**: `deps` / `impact`가 파일이 import하고 정의하는 것 + 변경 시 영향받는 파일을 표시. Graphviz `--dot` 출력 옵션.
+- **커스텀 청킹**: `--chunk-regex`로 정규식 패턴을 이용해 청크 경계를 직접 정의. TTL, Markdown, XML, 로그, Prolog 등 모든 파일 형식에서 섹션 헤더, RDF 주제, 빈 줄 등 원하는 기준으로 분할 가능.
 - **빌드 / CI 압축**: `digest`가 cargo, pnpm/npm/yarn/bun, tsc, pytest, go test, gradle, ruff, mypy, clang/gcc/cmake/make/swiftc, GitHub Actions를 자동 감지.
 - **단일 바이너리**: Python 없음, daemon 없음, API key 없음. CPU에서 동작.
 
@@ -102,6 +103,25 @@ semble_rs plan "인증 버그 고치기" ./my-project -k 5
 ### `--model`
 
 모든 search 계열 명령은 `--model <hf-repo-or-local-path>` 옵션으로 임베더를 교체할 수 있습니다. `SEMBLE_MODEL_PATH` 환경변수도 지원.
+
+### `--chunk-regex`
+
+정규식 패턴으로 청크 경계를 정의합니다. 패턴이 매치될 때마다 새 청크가 시작되고, 이전 매치부터 직전 매치까지의 내용이 하나의 청크가 됩니다. `--chunk-regex`가 제공되면 tree-sitter와 라인 기반 fallback보다 우선 적용됩니다.
+
+코드가 아닌 구조화된 파일(TTL, Markdown, YAML, 로그, XML, Prolog 등)에서 유용합니다.
+
+```bash
+# 주석 헤더 기준 분할 (TTL glossary, Markdown 문서)
+semble_rs search "fundamenta" wiki-grep-glossary.ttl --chunk-regex '(?m)^# ' --include-text-files --compact
+
+# RDF 주제 기준 분할 (각 리소스가 하나의 청크)
+semble_rs search "prescricao" wiki-grep-index.ttl --chunk-regex 'wiki-res:\S+ rdf:type ' --include-text-files --outline
+
+# 빈 줄 기준 분할 (Turtle 멀티라인 블록)
+semble_rs search "acesso" wiki-instances.ttl --chunk-regex '\n\s*\n' --include-text-files --compact
+```
+
+`--chunk-regex`는 `search`, `plan`, `find-related` 명령에서 사용 가능합니다. 비코드 형식을 인덱싱하려면 `--include-text-files`를 함께 사용하세요.
 
 ## Tree
 
