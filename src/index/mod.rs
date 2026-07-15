@@ -38,6 +38,7 @@ impl SembleIndex {
         ignore: Option<&HashSet<String>>,
         include_text_files: bool,
         chunk_regex: Option<&Regex>,
+        single_file: Option<&str>,
     ) -> Result<Self> {
         let path = path.as_ref();
         if !path.exists() {
@@ -62,6 +63,7 @@ impl SembleIndex {
             include_text_files,
             &display_root,
             chunk_regex,
+            single_file,
         )?;
 
         let file_sizes = compute_file_sizes(&display_root, &chunks);
@@ -127,6 +129,7 @@ impl SembleIndex {
             include_text_files,
             &resolved,
             chunk_regex,
+            None,
         );
 
         let (bm25_index, semantic_index, chunks, graph) = match result {

@@ -51,28 +51,41 @@ pub fn create_index_from_path(
     include_text_files: bool,
     display_root: &Path,
     chunk_regex: Option<&Regex>,
+    single_file: Option<&str>,
 ) -> Result<(Bm25Index, SemanticIndex, Vec<Chunk>, DependencyGraph)> {
-    let exts = filter_extensions(extensions, include_text_files);
-
-    let files: Vec<std::path::PathBuf> = if path.is_dir() {
-        walk_files(path, &exts, ignore)
-    } else {
-        vec![path.to_path_buf()]
-    };
-
     let mut chunks: Vec<Chunk> = Vec::new();
     let mut graph = DependencyGraph::new();
+
+    let explicit_file = single_file.is_some();
+
+    let files: Vec<std::path::PathBuf> = if let Some(sf) = single_file {
+        let target = display_root.join(sf);
+        if !target.exists() {
+            bail!("File specified by --file not found: {}", target.display());
+        }
+        let target = target.canonicalize().context("Failed to resolve --file path")?;
+        vec![target]
+    } else {
+        let exts = filter_extensions(extensions, include_text_files);
+        walk_files(path, &exts, ignore)
+    };
 
     for file_path in &files {
         let metadata = match file_path.metadata() {
             Ok(m) => m,
+            Err(e) if explicit_file => {
+                bail!("Cannot read --file '{}': {e}", file_path.display());
+            }
             Err(_) => continue,
         };
-        if metadata.len() > MAX_FILE_BYTES {
+        if metadata.len() > MAX_FILE_BYTES && !explicit_file {
             continue;
         }
         let source = match std::fs::read_to_string(file_path) {
             Ok(s) => s,
+            Err(e) if explicit_file => {
+                bail!("Cannot read --file '{}': {e}", file_path.display());
+            }
             Err(_) => continue,
         };
         let language = language_for_path(file_path);
@@ -89,7 +102,11 @@ pub fn create_index_from_path(
     }
 
     if chunks.is_empty() {
-        bail!("No supported files found under {}", path.display());
+        if let Some(sf) = single_file {
+            bail!("No chunks produced from --file '{}' (check that --include-text-files is set and --chunk-regex matches)", sf);
+        } else {
+            bail!("No supported files found under {}", path.display());
+        }
     }
 
     graph.resolve_dependencies();
