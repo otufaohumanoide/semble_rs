@@ -276,7 +276,23 @@ fn chunk_with_regex(source: &str, regex: &Regex) -> Vec<ChunkBoundary> {
     boundaries
 }
 
-pub fn chunk_source(source: &str, file_path: &str, language: Option<&str>, chunk_regex: Option<&Regex>) -> Vec<Chunk> {
+fn compute_search_text(content: &str, regex: &Regex) -> Option<String> {
+    let parts: Vec<&str> = content
+        .lines()
+        .filter_map(|line| {
+            let caps = regex.captures(line)?;
+            let matched = caps.get(1).or_else(|| caps.get(0))?;
+            Some(matched.as_str())
+        })
+        .collect();
+    if parts.is_empty() {
+        Some(String::new())
+    } else {
+        Some(parts.join(" "))
+    }
+}
+
+pub fn chunk_source(source: &str, file_path: &str, language: Option<&str>, chunk_regex: Option<&Regex>, index_field: Option<&Regex>) -> Vec<Chunk> {
     if source.trim().is_empty() {
         return Vec::new();
     }
@@ -301,13 +317,20 @@ pub fn chunk_source(source: &str, file_path: &str, language: Option<&str>, chunk
             1
         };
 
-        chunks.push(Chunk::new(
+        let mut chunk = Chunk::new(
             text.to_string(),
             file_path.to_string(),
             start_line,
             end_line,
             language.map(String::from),
-        ));
+            None,
+        );
+
+        if let Some(re) = index_field {
+            chunk.search_text = compute_search_text(&chunk.content, re);
+        }
+
+        chunks.push(chunk);
     }
 
     chunks
@@ -330,7 +353,7 @@ struct MyStruct {
     field: i32,
 }
 "#;
-        let chunks = chunk_source(source, "test.rs", Some("rust"), None);
+        let chunks = chunk_source(source, "test.rs", Some("rust"), None, None);
         assert!(!chunks.is_empty());
         let all_content: String = chunks.iter().map(|c| c.content.as_str()).collect();
         assert!(all_content.contains("fn foo"));
@@ -344,7 +367,7 @@ struct MyStruct {
         let source = format!(
             "fn foo() {{\n{long_body}}}\n\nfn bar() {{\n{long_body}}}\n\nfn baz() {{\n{long_body}}}\n"
         );
-        let chunks = chunk_source(&source, "test.rs", Some("rust"), None);
+        let chunks = chunk_source(&source, "test.rs", Some("rust"), None, None);
         assert!(
             chunks.len() >= 2,
             "large source should split: got {} chunks",
@@ -357,7 +380,7 @@ struct MyStruct {
         let long_body = "    x = 1\n".repeat(100);
         let source =
             format!("import os\n\nclass MyClass:\n{long_body}\ndef standalone():\n{long_body}\n");
-        let chunks = chunk_source(&source, "test.py", Some("python"), None);
+        let chunks = chunk_source(&source, "test.py", Some("python"), None, None);
         assert!(
             chunks.len() >= 2,
             "large python source should split: got {} chunks",
@@ -371,7 +394,7 @@ struct MyStruct {
     #[test]
     fn test_fallback_for_unknown_language() {
         let source = "line1\nline2\nline3\n";
-        let chunks = chunk_source(source, "test.xyz", None, None);
+        let chunks = chunk_source(source, "test.xyz", None, None, None);
         assert!(!chunks.is_empty());
     }
 
@@ -390,7 +413,7 @@ class Greeter {
     }
 }
 "#;
-        let chunks = chunk_source(source, "test.js", Some("javascript"), None);
+        let chunks = chunk_source(source, "test.js", Some("javascript"), None, None);
         assert!(!chunks.is_empty());
         let all_content: String = chunks.iter().map(|c| c.content.as_str()).collect();
         assert!(all_content.contains("function hello"));
@@ -412,7 +435,7 @@ func helper() int {
     return 42
 }
 "#;
-        let chunks = chunk_source(source, "test.go", Some("go"), None);
+        let chunks = chunk_source(source, "test.go", Some("go"), None, None);
         assert!(!chunks.is_empty());
         let all_content: String = chunks.iter().map(|c| c.content.as_str()).collect();
         assert!(all_content.contains("func main"));
@@ -438,7 +461,7 @@ fun topLevel(): String = "hi"
 
 typealias Name = String
 "#;
-        let chunks = chunk_source(source, "Foo.kt", Some("kotlin"), None);
+        let chunks = chunk_source(source, "Foo.kt", Some("kotlin"), None, None);
         assert!(!chunks.is_empty());
         let all_content: String = chunks.iter().map(|c| c.content.as_str()).collect();
         assert!(all_content.contains("class Foo"));
@@ -452,7 +475,7 @@ typealias Name = String
         let body = "    val x = 1\n".repeat(80);
         let source =
             format!("class A {{\n{body}}}\n\nclass B {{\n{body}}}\n\nclass C {{\n{body}}}\n");
-        let chunks = chunk_source(&source, "Big.kt", Some("kotlin"), None);
+        let chunks = chunk_source(&source, "Big.kt", Some("kotlin"), None, None);
         assert!(
             chunks.len() >= 3,
             "large kotlin source should split by class: got {} chunks",
@@ -489,7 +512,7 @@ def standalone
   42
 end
 "#;
-        let chunks = chunk_source(source, "test.rb", Some("ruby"), None);
+        let chunks = chunk_source(source, "test.rb", Some("ruby"), None, None);
         assert!(!chunks.is_empty());
         let all_content: String = chunks.iter().map(|c| c.content.as_str()).collect();
         assert!(all_content.contains("class Greeter"));
@@ -516,7 +539,7 @@ function helper() {
     return 1;
 }
 "#;
-        let chunks = chunk_source(source, "test.php", Some("php"), None);
+        let chunks = chunk_source(source, "test.php", Some("php"), None, None);
         assert!(!chunks.is_empty());
         let all_content: String = chunks.iter().map(|c| c.content.as_str()).collect();
         assert!(all_content.contains("class UserController"));
@@ -543,7 +566,7 @@ func standalone() -> Int {
     return 42
 }
 "#;
-        let chunks = chunk_source(source, "test.swift", Some("swift"), None);
+        let chunks = chunk_source(source, "test.swift", Some("swift"), None, None);
         assert!(!chunks.is_empty());
         let all_content: String = chunks.iter().map(|c| c.content.as_str()).collect();
         assert!(all_content.contains("struct User"));
@@ -555,7 +578,7 @@ func standalone() -> Int {
     fn test_regex_chunking_sections() {
         let source = "===A===\nline1\nline2\n===B===\nline3\nline4\n";
         let re = Regex::new(r"(?m)^={3,}.*={3,}$").unwrap();
-        let chunks = chunk_source(source, "test.txt", None, Some(&re));
+        let chunks = chunk_source(source, "test.txt", None, Some(&re), None);
         assert_eq!(chunks.len(), 2);
         assert!(chunks[0].content.contains("line1"));
         assert!(chunks[0].content.contains("line2"));
@@ -566,7 +589,7 @@ func standalone() -> Int {
     fn test_regex_no_matches_fallback() {
         let source = "line1\nline2\nline3\n";
         let re = Regex::new(r"^NUNCA_MATCHA").unwrap();
-        let chunks = chunk_source(source, "test.txt", None, Some(&re));
+        let chunks = chunk_source(source, "test.txt", None, Some(&re), None);
         assert!(!chunks.is_empty());
     }
 
@@ -574,7 +597,7 @@ func standalone() -> Int {
     fn test_regex_with_preamble() {
         let source = "intro text\n# Section 1\ncontent\n";
         let re = Regex::new(r"(?m)^# ").unwrap();
-        let chunks = chunk_source(source, "test.txt", None, Some(&re));
+        let chunks = chunk_source(source, "test.txt", None, Some(&re), None);
         assert_eq!(chunks.len(), 2);
         assert!(chunks[0].content.contains("intro text"));
         assert!(chunks[1].content.contains("Section 1"));
@@ -584,7 +607,7 @@ func standalone() -> Int {
     fn test_regex_overrides_tree_sitter() {
         let source = "fn foo() {}\n# ---\nfn bar() {}\n";
         let re = Regex::new(r"(?m)^# ---").unwrap();
-        let chunks = chunk_source(source, "test.rs", Some("rust"), Some(&re));
+        let chunks = chunk_source(source, "test.rs", Some("rust"), Some(&re), None);
         assert_eq!(chunks.len(), 2);
         assert!(chunks[0].content.contains("foo"));
         assert!(chunks[1].content.contains("bar"));
@@ -594,7 +617,7 @@ func standalone() -> Int {
     fn test_regex_ttl_comment_headers() {
         let source = "# Predicados\nwiki:abrange rdfs:label \"abrange\" .\n# Tipos\nwiki:Concept a owl:Class .\n";
         let re = Regex::new(r"(?m)^# ").unwrap();
-        let chunks = chunk_source(source, "test.ttl", None, Some(&re));
+        let chunks = chunk_source(source, "test.ttl", None, Some(&re), None);
         assert_eq!(chunks.len(), 2);
         assert!(chunks[0].content.contains("Predicados"));
         assert!(chunks[0].content.contains("abrange"));
@@ -606,7 +629,7 @@ func standalone() -> Int {
     fn test_regex_ttl_rdf_type_boundary() {
         let source = "wiki-res:lei rdf:type wiki:Statute .\nwiki-res:lei dc:title \"LC\" .\nwiki-res:eia rdf:type wiki:Concept .\nwiki-res:eia dc:title \"EIA\" .\n";
         let re = Regex::new(r"wiki-res:\S+ rdf:type ").unwrap();
-        let chunks = chunk_source(source, "index.ttl", None, Some(&re));
+        let chunks = chunk_source(source, "index.ttl", None, Some(&re), None);
         assert_eq!(chunks.len(), 2);
         assert!(chunks[0].content.contains("lei"));
         assert!(chunks[1].content.contains("eia"));
@@ -616,7 +639,7 @@ func standalone() -> Int {
     fn test_regex_blank_line_separator() {
         let source = "wiki:acesso-por a owl:ObjectProperty ;\n    rdfs:label \"acesso por\" .\n\nwiki:aciona-via a owl:ObjectProperty ;\n    rdfs:label \"aciona-via\" .\n";
         let re = Regex::new(r"\n\s*\n").unwrap();
-        let chunks = chunk_source(source, "instances.ttl", None, Some(&re));
+        let chunks = chunk_source(source, "instances.ttl", None, Some(&re), None);
         assert_eq!(chunks.len(), 2);
         assert!(chunks[0].content.contains("acesso-por"));
         assert!(chunks[1].content.contains("aciona-via"));

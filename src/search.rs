@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use regex::Regex;
 use crate::bm25::Bm25Index;
 use crate::encoder::{SemanticIndex, StaticEncoder};
 use crate::graph::DependencyGraph;
@@ -34,7 +35,7 @@ fn selector_to_mask(selector: Option<&[usize]>, size: usize) -> Option<Vec<bool>
     Some(mask)
 }
 
-fn find_match_lines(chunk: &Chunk, query: &str) -> Vec<MatchLine> {
+fn find_match_lines(chunk: &Chunk, query: &str, index_field: Option<&Regex>) -> Vec<MatchLine> {
     let query_lower = query.to_lowercase();
     let keywords: Vec<&str> = query_lower
         .split_whitespace()
@@ -46,6 +47,11 @@ fn find_match_lines(chunk: &Chunk, query: &str) -> Vec<MatchLine> {
 
     let mut matches = Vec::new();
     for (i, line) in chunk.content.lines().enumerate() {
+        if let Some(re) = index_field {
+            if !re.is_match(line) {
+                continue;
+            }
+        }
         let line_lower = line.to_lowercase();
         if keywords.iter().any(|kw| line_lower.contains(kw)) {
             matches.push(MatchLine {
@@ -70,7 +76,13 @@ fn boost_sibling_chunks(scores: &mut HashMap<usize, f64>, chunks: &[Chunk], quer
 
     let mut file_has_match: HashMap<&str, f64> = HashMap::new();
     for (idx, chunk) in chunks.iter().enumerate() {
-        let content_lower = chunk.content.to_lowercase();
+        let searchable = chunk
+            .search_text
+            .as_ref()
+            .filter(|s| !s.is_empty())
+            .map(|s| s.as_str())
+            .unwrap_or(chunk.content.as_str());
+        let content_lower = searchable.to_lowercase();
         if keywords.iter().any(|kw| content_lower.contains(kw)) {
             let score = scores.get(&idx).copied().unwrap_or(0.001);
             let fp = chunk.file_path.as_str();
@@ -82,7 +94,13 @@ fn boost_sibling_chunks(scores: &mut HashMap<usize, f64>, chunks: &[Chunk], quer
     }
 
     for (idx, chunk) in chunks.iter().enumerate() {
-        let content_lower = chunk.content.to_lowercase();
+        let searchable = chunk
+            .search_text
+            .as_ref()
+            .filter(|s| !s.is_empty())
+            .map(|s| s.as_str())
+            .unwrap_or(chunk.content.as_str());
+        let content_lower = searchable.to_lowercase();
         let match_count = keywords
             .iter()
             .filter(|kw| content_lower.contains(kw.as_str()))
@@ -156,6 +174,7 @@ pub fn search_bm25(
     chunks: &[Chunk],
     top_k: usize,
     selector: Option<&[usize]>,
+    index_field: Option<&Regex>,
 ) -> Vec<SearchResult> {
     let tokens = tokenize(query);
     if tokens.is_empty() {
@@ -176,7 +195,7 @@ pub fn search_bm25(
     let results: Vec<SearchResult> = indexed
         .into_iter()
         .map(|(idx, score)| {
-            let match_lines = find_match_lines(&chunks[idx], query);
+            let match_lines = find_match_lines(&chunks[idx], query, index_field);
             SearchResult {
                 chunk: chunks[idx].clone(),
                 score,
@@ -199,6 +218,7 @@ pub fn search_hybrid(
     alpha: Option<f64>,
     selector: Option<&[usize]>,
     graph: Option<&DependencyGraph>,
+    index_field: Option<&Regex>,
 ) -> Vec<SearchResult> {
     let alpha_weight = resolve_alpha(query, alpha);
     let candidate_count = top_k * 5;
@@ -206,7 +226,7 @@ pub fn search_hybrid(
     let query_embedding = match encoder.encode_single(query) {
         Ok(e) => e,
         Err(_) => {
-            return search_bm25(query, bm25_index, chunks, top_k, selector);
+            return search_bm25(query, bm25_index, chunks, top_k, selector, index_field);
         }
     };
     let semantic_results = semantic_index.query(&query_embedding, candidate_count, selector);
@@ -260,7 +280,7 @@ pub fn search_hybrid(
     let results: Vec<SearchResult> = ranked
         .into_iter()
         .map(|(idx, score)| {
-            let match_lines = find_match_lines(&chunks[idx], query);
+            let match_lines = find_match_lines(&chunks[idx], query, index_field);
             SearchResult {
                 chunk: chunks[idx].clone(),
                 score,

@@ -8,6 +8,10 @@ pub struct Chunk {
     pub start_line: usize,
     pub end_line: usize,
     pub language: Option<String>,
+    /// Extracted text via --index-field regex. None = no extraction.
+    /// Some("") = regex applied but no lines matched.
+    /// Some(text) = extracted text used for search indexing.
+    pub search_text: Option<String>,
 }
 
 impl Chunk {
@@ -17,6 +21,7 @@ impl Chunk {
         start_line: usize,
         end_line: usize,
         language: Option<String>,
+        search_text: Option<String>,
     ) -> Self {
         Self {
             content,
@@ -24,6 +29,7 @@ impl Chunk {
             start_line,
             end_line,
             language,
+            search_text,
         }
     }
 

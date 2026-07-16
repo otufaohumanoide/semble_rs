@@ -388,6 +388,7 @@ mod tests {
                 10,
                 12,
                 Some("rust".to_string()),
+                None,
             ),
             score: 0.42,
             match_lines: vec![MatchLine {
@@ -421,6 +422,7 @@ mod tests {
                 1,
                 8,
                 Some("python".to_string()),
+                None,
             ),
             score: 0.05,
             match_lines: vec![MatchLine {
@@ -448,6 +450,7 @@ mod tests {
                     1,
                     2,
                     Some("python".to_string()),
+                    None,
                 ),
                 score: 0.10,
                 match_lines: vec![],
@@ -459,6 +462,7 @@ mod tests {
                     1,
                     4,
                     Some("python".to_string()),
+                    None,
                 ),
                 score: 0.08,
                 match_lines: vec![MatchLine {

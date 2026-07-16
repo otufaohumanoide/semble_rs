@@ -14,7 +14,24 @@ use crate::types::Chunk;
 
 const MAX_FILE_BYTES: u64 = 2_000_000;
 
-fn enrich_for_bm25(chunk: &Chunk) -> String {
+fn text_for_indexing(chunk: &Chunk, fallback: bool) -> &str {
+    if let Some(ref st) = chunk.search_text {
+        if st.is_empty() {
+            if fallback {
+                &chunk.content
+            } else {
+                ""
+            }
+        } else {
+            st
+        }
+    } else {
+        &chunk.content
+    }
+}
+
+fn enrich_for_bm25(chunk: &Chunk, fallback: bool) -> String {
+    let text = text_for_indexing(chunk, fallback);
     let path = Path::new(&chunk.file_path);
     let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
     let dir_parts: Vec<&str> = path
@@ -40,7 +57,7 @@ fn enrich_for_bm25(chunk: &Chunk) -> String {
         .cloned()
         .collect::<Vec<_>>()
         .join(" ");
-    format!("{} {stem} {stem} {dir_text}", chunk.content)
+    format!("{} {stem} {stem} {dir_text}", text)
 }
 
 pub fn create_index_from_path(
@@ -52,6 +69,8 @@ pub fn create_index_from_path(
     display_root: &Path,
     chunk_regex: Option<&Regex>,
     single_file: Option<&str>,
+    index_field: Option<&Regex>,
+    index_fallback: bool,
 ) -> Result<(Bm25Index, SemanticIndex, Vec<Chunk>, DependencyGraph)> {
     let mut chunks: Vec<Chunk> = Vec::new();
     let mut graph = DependencyGraph::new();
@@ -94,7 +113,7 @@ pub fn create_index_from_path(
             .unwrap_or(file_path)
             .to_string_lossy()
             .to_string();
-        chunks.extend(chunk_source(&source, &chunk_path, language, chunk_regex));
+        chunks.extend(chunk_source(&source, &chunk_path, language, chunk_regex, index_field));
 
         if let Some(lang) = language {
             graph.add_file(&chunk_path, &source, lang);
@@ -111,7 +130,10 @@ pub fn create_index_from_path(
 
     graph.resolve_dependencies();
 
-    let texts: Vec<String> = chunks.iter().map(|c| c.content.clone()).collect();
+    let texts: Vec<String> = chunks
+        .iter()
+        .map(|c| text_for_indexing(c, index_fallback).to_string())
+        .collect();
     let embeddings = encoder
         .encode_batch(&texts)
         .context("Failed to encode chunks")?;
@@ -119,7 +141,7 @@ pub fn create_index_from_path(
 
     let bm25_docs: Vec<Vec<String>> = chunks
         .iter()
-        .map(|chunk| tokenize(&enrich_for_bm25(chunk)))
+        .map(|chunk| tokenize(&enrich_for_bm25(chunk, index_fallback)))
         .collect();
     let bm25_index = Bm25Index::new(&bm25_docs);
 

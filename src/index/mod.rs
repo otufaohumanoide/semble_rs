@@ -28,6 +28,7 @@ pub struct SembleIndex {
     file_mapping: HashMap<String, Vec<usize>>,
     language_mapping: HashMap<String, Vec<usize>>,
     graph: DependencyGraph,
+    index_field: Option<Regex>,
 }
 
 impl SembleIndex {
@@ -39,6 +40,8 @@ impl SembleIndex {
         include_text_files: bool,
         chunk_regex: Option<&Regex>,
         single_file: Option<&str>,
+        index_field: Option<&Regex>,
+        index_fallback: bool,
     ) -> Result<Self> {
         let path = path.as_ref();
         if !path.exists() {
@@ -64,6 +67,8 @@ impl SembleIndex {
             &display_root,
             chunk_regex,
             single_file,
+            index_field,
+            index_fallback,
         )?;
 
         let file_sizes = compute_file_sizes(&display_root, &chunks);
@@ -79,6 +84,7 @@ impl SembleIndex {
             file_mapping,
             language_mapping,
             graph,
+            index_field: index_field.cloned(),
         })
     }
 
@@ -90,6 +96,8 @@ impl SembleIndex {
         ignore: Option<&HashSet<String>>,
         include_text_files: bool,
         chunk_regex: Option<&Regex>,
+        index_field: Option<&Regex>,
+        index_fallback: bool,
     ) -> Result<Self> {
         let tmp_dir = std::env::temp_dir().join(format!("semble-clone-{}", std::process::id()));
         std::fs::create_dir_all(&tmp_dir)?;
@@ -130,6 +138,8 @@ impl SembleIndex {
             &resolved,
             chunk_regex,
             None,
+            index_field,
+            index_fallback,
         );
 
         let (bm25_index, semantic_index, chunks, graph) = match result {
@@ -154,6 +164,7 @@ impl SembleIndex {
             file_mapping,
             language_mapping,
             graph,
+            index_field: index_field.cloned(),
         })
     }
 
@@ -182,6 +193,7 @@ impl SembleIndex {
             alpha,
             selector_ref,
             Some(&self.graph),
+            self.index_field.as_ref(),
         );
 
         save_search_stats(&results, CallType::Search, &self.file_sizes);

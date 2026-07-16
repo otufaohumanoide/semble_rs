@@ -67,6 +67,14 @@ enum Commands {
         /// Restrict search to a single file (relative to path)
         #[arg(long)]
         file: Option<String>,
+        /// Regex with capture group 1 to extract text for search indexing.
+        /// Only captured text is indexed (BM25 + embeddings); full lines displayed.
+        #[arg(long)]
+        index_field: Option<String>,
+        /// When --index-field is set, fall back to full chunk content for
+        /// chunks whose lines do not match the index field regex.
+        #[arg(long)]
+        index_fallback: bool,
     },
     /// Find code similar to a specific location
     FindRelated {
@@ -176,6 +184,13 @@ enum Commands {
         /// Restrict search to a single file (relative to path)
         #[arg(long)]
         file: Option<String>,
+        /// Regex with capture group 1 to extract text for search indexing.
+        #[arg(long)]
+        index_field: Option<String>,
+        /// When --index-field is set, fall back to full chunk content for
+        /// chunks whose lines do not match the index field regex.
+        #[arg(long)]
+        index_fallback: bool,
     },
     /// Show token savings and usage stats
     Savings {
@@ -242,7 +257,7 @@ fn main() {
             lang,
             include_text_files,
         } => {
-            let index = build_index(&path, include_text_files, None, None, None);
+            let index = build_index(&path, include_text_files, None, None, None, None, false);
             let opts = TreeOptions {
                 dirs_only,
                 max_depth,
@@ -373,9 +388,8 @@ fn main() {
             tree,
             max_depth,
         } => {
-            let index = build_index(&path, false, None, None, None);
+            let index = build_index(&path, false, None, None, None, None, false);
             let graph = index.graph();
-
             if dot {
                 println!("{}", graph.deps_dot(&file_path));
                 return;
@@ -448,9 +462,8 @@ fn main() {
             tree,
             max_depth,
         } => {
-            let index = build_index(&path, false, None, None, None);
+            let index = build_index(&path, false, None, None, None, None, false);
             let graph = index.graph();
-
             if dot {
                 println!("{}", graph.impact_dot(&file_path));
                 return;
@@ -489,8 +502,10 @@ fn main() {
             model,
             chunk_regex,
             file,
+            index_field,
+            index_fallback,
         } => {
-            let index = build_index(&path, include_text_files, model.as_deref(), chunk_regex.as_deref(), file.as_deref());
+            let index = build_index(&path, include_text_files, model.as_deref(), chunk_regex.as_deref(), file.as_deref(), index_field.as_deref(), index_fallback);
             let results = index.search(task.as_str(), top_k, None, None, None);
             let report = build_plan(&task, &path, top_k, &results);
 
@@ -516,8 +531,10 @@ fn main() {
             model,
             chunk_regex,
             file,
+            index_field,
+            index_fallback,
         } => {
-            let index = build_index(&path, include_text_files, model.as_deref(), chunk_regex.as_deref(), file.as_deref());
+            let index = build_index(&path, include_text_files, model.as_deref(), chunk_regex.as_deref(), file.as_deref(), index_field.as_deref(), index_fallback);
 
             let results = index.search(query.as_str(), top_k, None, None, None);
             if outline {
@@ -550,7 +567,7 @@ fn main() {
             chunk_regex,
             file,
         } => {
-            let index = build_index(&path, include_text_files, model.as_deref(), chunk_regex.as_deref(), file.as_deref());
+            let index = build_index(&path, include_text_files, model.as_deref(), chunk_regex.as_deref(), file.as_deref(), None, false);
 
             let chunk = match resolve_chunk(index.chunks(), &file_path, line) {
                 Some(c) => c.clone(),
@@ -752,6 +769,7 @@ fn print_json_stripped(results: &[SearchResult]) {
                     r.chunk.start_line,
                     r.chunk.end_line,
                     r.chunk.language.clone(),
+                    r.chunk.search_text.clone(),
                 ),
                 score: r.score,
                 match_lines: r.match_lines.clone(),
@@ -771,7 +789,7 @@ fn print_json(results: &[SearchResult]) {
     );
 }
 
-fn build_index(path: &str, include_text_files: bool, model: Option<&str>, chunk_regex: Option<&str>, single_file: Option<&str>) -> SembleIndex {
+fn build_index(path: &str, include_text_files: bool, model: Option<&str>, chunk_regex: Option<&str>, single_file: Option<&str>, index_field: Option<&str>, index_fallback: bool) -> SembleIndex {
     let encoder = model.map(|m| {
         StaticEncoder::load(Some(m)).unwrap_or_else(|e| {
             eprintln!("Failed to load model {m:?}: {e}");
@@ -784,10 +802,16 @@ fn build_index(path: &str, include_text_files: bool, model: Option<&str>, chunk_
             process::exit(1);
         })
     });
+    let index_re = index_field.map(|r| {
+        Regex::new(r).unwrap_or_else(|e| {
+            eprintln!("Invalid --index-field pattern: {e}");
+            process::exit(1);
+        })
+    });
     let result = if is_git_url(path) {
-        SembleIndex::from_git(path, None, encoder, None, None, include_text_files, chunk_re.as_ref())
+        SembleIndex::from_git(path, None, encoder, None, None, include_text_files, chunk_re.as_ref(), index_re.as_ref(), index_fallback)
     } else {
-        SembleIndex::from_path(path, encoder, None, None, include_text_files, chunk_re.as_ref(), single_file)
+        SembleIndex::from_path(path, encoder, None, None, include_text_files, chunk_re.as_ref(), single_file, index_re.as_ref(), index_fallback)
     };
 
     match result {
