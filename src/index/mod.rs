@@ -42,6 +42,7 @@ impl SembleIndex {
         single_file: Option<&str>,
         index_field: Option<&Regex>,
         index_fallback: bool,
+        per_line: bool,
     ) -> Result<Self> {
         let path = path.as_ref();
         if !path.exists() {
@@ -69,6 +70,7 @@ impl SembleIndex {
             single_file,
             index_field,
             index_fallback,
+            per_line,
         )?;
 
         let file_sizes = compute_file_sizes(&display_root, &chunks);
@@ -98,6 +100,7 @@ impl SembleIndex {
         chunk_regex: Option<&Regex>,
         index_field: Option<&Regex>,
         index_fallback: bool,
+        per_line: bool,
     ) -> Result<Self> {
         let tmp_dir = std::env::temp_dir().join(format!("semble-clone-{}", std::process::id()));
         std::fs::create_dir_all(&tmp_dir)?;
@@ -140,6 +143,7 @@ impl SembleIndex {
             None,
             index_field,
             index_fallback,
+            per_line,
         );
 
         let (bm25_index, semantic_index, chunks, graph) = match result {
