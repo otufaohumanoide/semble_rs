@@ -264,6 +264,13 @@ pub fn file_types() -> Vec<(&'static str, FileType)> {
             },
         ),
         (
+            ".txt",
+            FileType {
+                language: "text",
+                category: FileCategory::Document,
+            },
+        ),
+        (
             ".html",
             FileType {
                 language: "html",
@@ -464,6 +471,15 @@ const MINIFIED_FILENAME_PATTERNS: &[&str] = &[
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    #[test]
+    fn txt_only_indexed_with_include_text_files() {
+        let exts_com = filter_extensions(None, true);
+        assert!(exts_com.contains(".txt"));
+
+        let exts_sem = filter_extensions(None, false);
+        assert!(!exts_sem.contains(".txt"));
+    }
 
     #[test]
     fn detects_dot_min_suffix() {
