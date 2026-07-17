@@ -35,7 +35,7 @@ fn selector_to_mask(selector: Option<&[usize]>, size: usize) -> Option<Vec<bool>
     Some(mask)
 }
 
-fn find_match_lines(chunk: &Chunk, query: &str, index_field: Option<&Regex>) -> Vec<MatchLine> {
+fn find_match_lines(chunk: &Chunk, query: &str, index_field: Option<&Regex>, filter_field: Option<&Regex>) -> Vec<MatchLine> {
     let query_lower = query.to_lowercase();
     let keywords: Vec<&str> = query_lower
         .split_whitespace()
@@ -47,6 +47,11 @@ fn find_match_lines(chunk: &Chunk, query: &str, index_field: Option<&Regex>) -> 
 
     let mut matches = Vec::new();
     for (i, line) in chunk.content.lines().enumerate() {
+        if let Some(filter_re) = filter_field {
+            if !filter_re.is_match(line) {
+                continue;
+            }
+        }
         if let Some(re) = index_field {
             if !re.is_match(line) {
                 continue;
@@ -175,6 +180,7 @@ pub fn search_bm25(
     top_k: usize,
     selector: Option<&[usize]>,
     index_field: Option<&Regex>,
+    filter_field: Option<&Regex>,
 ) -> Vec<SearchResult> {
     let tokens = tokenize(query);
     if tokens.is_empty() {
@@ -195,7 +201,7 @@ pub fn search_bm25(
     let results: Vec<SearchResult> = indexed
         .into_iter()
         .map(|(idx, score)| {
-            let match_lines = find_match_lines(&chunks[idx], query, index_field);
+            let match_lines = find_match_lines(&chunks[idx], query, index_field, filter_field);
             SearchResult {
                 chunk: chunks[idx].clone(),
                 score,
@@ -207,7 +213,6 @@ pub fn search_bm25(
     filter_low_scores(results)
 }
 
-#[allow(clippy::too_many_arguments)]
 pub fn search_hybrid(
     query: &str,
     encoder: &StaticEncoder,
@@ -219,6 +224,7 @@ pub fn search_hybrid(
     selector: Option<&[usize]>,
     graph: Option<&DependencyGraph>,
     index_field: Option<&Regex>,
+    filter_field: Option<&Regex>,
 ) -> Vec<SearchResult> {
     let alpha_weight = resolve_alpha(query, alpha);
     let candidate_count = top_k * 5;
@@ -226,7 +232,7 @@ pub fn search_hybrid(
     let query_embedding = match encoder.encode_single(query) {
         Ok(e) => e,
         Err(_) => {
-            return search_bm25(query, bm25_index, chunks, top_k, selector, index_field);
+            return search_bm25(query, bm25_index, chunks, top_k, selector, index_field, filter_field);
         }
     };
     let semantic_results = semantic_index.query(&query_embedding, candidate_count, selector);
@@ -280,7 +286,7 @@ pub fn search_hybrid(
     let results: Vec<SearchResult> = ranked
         .into_iter()
         .map(|(idx, score)| {
-            let match_lines = find_match_lines(&chunks[idx], query, index_field);
+            let match_lines = find_match_lines(&chunks[idx], query, index_field, filter_field);
             SearchResult {
                 chunk: chunks[idx].clone(),
                 score,
@@ -290,4 +296,47 @@ pub fn search_hybrid(
         .collect();
 
     filter_low_scores(results)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::Chunk;
+
+    #[test]
+    fn find_match_lines_respects_filter_field() {
+        let chunk = Chunk::new(
+            "## Item A <i>alpha</i>\nlinha sem Item A\n".to_string(),
+            "test.txt".to_string(),
+            1,
+            2,
+            None,
+            None,
+        );
+        let filter_re = Regex::new(r"Item A").unwrap();
+
+        let matches = find_match_lines(&chunk, "alpha", None, Some(&filter_re));
+        assert_eq!(matches.len(), 1);
+        assert!(matches[0].content.contains("## Item A"));
+
+        let matches_sem = find_match_lines(&chunk, "alpha", None, None);
+        assert_eq!(matches_sem.len(), 1);
+    }
+
+    #[test]
+    fn find_match_lines_filter_and_index_field_exclude() {
+        let chunk = Chunk::new(
+            "## Item A <i>alpha</i>\n## Item B <i>beta</i>\n".to_string(),
+            "test.txt".to_string(),
+            1,
+            2,
+            None,
+            None,
+        );
+        let filter_re = Regex::new(r"Item A").unwrap();
+        let index_re = Regex::new(r"Item B").unwrap();
+
+        let matches = find_match_lines(&chunk, "alpha", Some(&index_re), Some(&filter_re));
+        assert_eq!(matches.len(), 0);
+    }
 }

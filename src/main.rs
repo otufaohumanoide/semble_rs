@@ -79,6 +79,11 @@ enum Commands {
         /// Overrides tree-sitter and line-based chunking; ignored when --chunk-regex is set.
         #[arg(long)]
         per_line: bool,
+        /// Regex filter: only lines matching this regex are included in search text.
+        /// Applied before --index-field extraction. When combined with --index-field,
+        /// lines must match --filter-field first, then --index-field extracts the capture group.
+        #[arg(long)]
+        filter_field: Option<String>,
     },
     /// Find code similar to a specific location
     FindRelated {
@@ -111,6 +116,10 @@ enum Commands {
         /// Overrides tree-sitter and line-based chunking; ignored when --chunk-regex is set.
         #[arg(long)]
         per_line: bool,
+        /// Regex filter: only lines matching this regex are included in search text.
+        /// Applied before --index-field extraction.
+        #[arg(long)]
+        filter_field: Option<String>,
     },
     /// Show what a file depends on and what symbols it defines
     Deps {
@@ -203,6 +212,10 @@ enum Commands {
         /// Overrides tree-sitter and line-based chunking; ignored when --chunk-regex is set.
         #[arg(long)]
         per_line: bool,
+        /// Regex filter: only lines matching this regex are included in search text.
+        /// Applied before --index-field extraction.
+        #[arg(long)]
+        filter_field: Option<String>,
     },
     /// Show token savings and usage stats
     Savings {
@@ -269,7 +282,7 @@ fn main() {
             lang,
             include_text_files,
         } => {
-            let index = build_index(&path, include_text_files, None, None, None, None, false, false);
+            let index = build_index(&path, include_text_files, None, None, None, None, false, false, None);
             let opts = TreeOptions {
                 dirs_only,
                 max_depth,
@@ -400,7 +413,7 @@ fn main() {
             tree,
             max_depth,
         } => {
-            let index = build_index(&path, false, None, None, None, None, false, false);
+            let index = build_index(&path, false, None, None, None, None, false, false, None);
             let graph = index.graph();
             if dot {
                 println!("{}", graph.deps_dot(&file_path));
@@ -474,7 +487,7 @@ fn main() {
             tree,
             max_depth,
         } => {
-            let index = build_index(&path, false, None, None, None, None, false, false);
+            let index = build_index(&path, false, None, None, None, None, false, false, None);
             let graph = index.graph();
             if dot {
                 println!("{}", graph.impact_dot(&file_path));
@@ -517,8 +530,9 @@ fn main() {
             index_field,
             index_fallback,
             per_line,
+            filter_field,
         } => {
-            let index = build_index(&path, include_text_files, model.as_deref(), chunk_regex.as_deref(), file.as_deref(), index_field.as_deref(), index_fallback, per_line);
+            let index = build_index(&path, include_text_files, model.as_deref(), chunk_regex.as_deref(), file.as_deref(), index_field.as_deref(), index_fallback, per_line, filter_field.as_deref());
             let results = index.search(task.as_str(), top_k, None, None, None);
             let report = build_plan(&task, &path, top_k, &results);
 
@@ -547,8 +561,9 @@ fn main() {
             index_field,
             index_fallback,
             per_line,
+            filter_field,
         } => {
-            let index = build_index(&path, include_text_files, model.as_deref(), chunk_regex.as_deref(), file.as_deref(), index_field.as_deref(), index_fallback, per_line);
+            let index = build_index(&path, include_text_files, model.as_deref(), chunk_regex.as_deref(), file.as_deref(), index_field.as_deref(), index_fallback, per_line, filter_field.as_deref());
 
             let results = index.search(query.as_str(), top_k, None, None, None);
             if outline {
@@ -581,8 +596,9 @@ fn main() {
             chunk_regex,
             file,
             per_line,
+            filter_field,
         } => {
-            let index = build_index(&path, include_text_files, model.as_deref(), chunk_regex.as_deref(), file.as_deref(), None, false, per_line);
+            let index = build_index(&path, include_text_files, model.as_deref(), chunk_regex.as_deref(), file.as_deref(), None, false, per_line, filter_field.as_deref());
 
             let chunk = match resolve_chunk(index.chunks(), &file_path, line) {
                 Some(c) => c.clone(),
@@ -804,7 +820,7 @@ fn print_json(results: &[SearchResult]) {
     );
 }
 
-fn build_index(path: &str, include_text_files: bool, model: Option<&str>, chunk_regex: Option<&str>, single_file: Option<&str>, index_field: Option<&str>, index_fallback: bool, per_line: bool) -> SembleIndex {
+fn build_index(path: &str, include_text_files: bool, model: Option<&str>, chunk_regex: Option<&str>, single_file: Option<&str>, index_field: Option<&str>, index_fallback: bool, per_line: bool, filter_field: Option<&str>) -> SembleIndex {
     let encoder = model.map(|m| {
         StaticEncoder::load(Some(m)).unwrap_or_else(|e| {
             eprintln!("Failed to load model {m:?}: {e}");
@@ -823,10 +839,16 @@ fn build_index(path: &str, include_text_files: bool, model: Option<&str>, chunk_
             process::exit(1);
         })
     });
+    let filter_re = filter_field.map(|r| {
+        Regex::new(r).unwrap_or_else(|e| {
+            eprintln!("Invalid --filter-field pattern: {e}");
+            process::exit(1);
+        })
+    });
     let result = if is_git_url(path) {
-        SembleIndex::from_git(path, None, encoder, None, None, include_text_files, chunk_re.as_ref(), index_re.as_ref(), index_fallback, per_line)
+        SembleIndex::from_git(path, None, encoder, None, None, include_text_files, chunk_re.as_ref(), index_re.as_ref(), index_fallback, per_line, filter_re.as_ref())
     } else {
-        SembleIndex::from_path(path, encoder, None, None, include_text_files, chunk_re.as_ref(), single_file, index_re.as_ref(), index_fallback, per_line)
+        SembleIndex::from_path(path, encoder, None, None, include_text_files, chunk_re.as_ref(), single_file, index_re.as_ref(), index_fallback, per_line, filter_re.as_ref())
     };
 
     match result {

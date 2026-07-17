@@ -72,6 +72,7 @@ pub fn create_index_from_path(
     index_field: Option<&Regex>,
     index_fallback: bool,
     per_line: bool,
+    filter_field: Option<&Regex>,
 ) -> Result<(Bm25Index, SemanticIndex, Vec<Chunk>, DependencyGraph)> {
     let mut chunks: Vec<Chunk> = Vec::new();
     let mut graph = DependencyGraph::new();
@@ -114,7 +115,7 @@ pub fn create_index_from_path(
             .unwrap_or(file_path)
             .to_string_lossy()
             .to_string();
-        chunks.extend(chunk_source(&source, &chunk_path, language, chunk_regex, index_field, per_line));
+        chunks.extend(chunk_source(&source, &chunk_path, language, chunk_regex, index_field, filter_field, per_line));
 
         if let Some(lang) = language {
             graph.add_file(&chunk_path, &source, lang);
